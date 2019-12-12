@@ -2,8 +2,10 @@ package znet
 
 import "C"
 import (
+	"errors"
 	"fmt"
 	"github.com/Cactush/zinx_test/ziface"
+	"io"
 	"net"
 )
 
@@ -31,16 +33,36 @@ func (c *Connection) StartReader() {
 	defer fmt.Printf(c.RemoteAddr().String(), " conn reader exit!")
 	defer c.Stop()
 	for {
-		buf := make([]byte, 512)
-		cnt, err := c.Conn.Read(buf)
-		if err != nil {
-			fmt.Println("recv buf err ", err)
+		// 创建拆包解包对象
+		dp := NewDataPack()
+
+		headData := make([]byte, dp.GetHeadLen())
+		if _, err := io.ReadFull(c.GetTCPConnection(), headData); err != nil {
+			fmt.Println("read msg head error ", err)
 			c.ExitBuffChan <- true
 			continue
 		}
+		msg, err := dp.Unpack(headData)
+		if err != nil {
+			fmt.Println("unpack error ", err)
+			c.ExitBuffChan <- true
+			continue
+		}
+
+		var data []byte
+		if msg.GetDatalen() > 0 {
+			data = make([]byte, msg.GetDatalen())
+			if _, err := io.ReadFull(c.GetTCPConnection(), data); err != nil {
+				fmt.Println("read msg data error ", err)
+				c.ExitBuffChan <- true
+				continue
+			}
+		}
+		msg.SetData(data)
+
 		req := Request{
 			conn: c,
-			data: buf[:cnt],
+			msg:  msg,
 		}
 		go func(request ziface.IRequest) {
 			c.Router.PreHandle(request)
@@ -80,4 +102,22 @@ func (c *Connection) GetConnID() uint32 {
 // 获取远程客户端地址信息
 func (c *Connection) RemoteAddr() net.Addr {
 	return c.Conn.RemoteAddr()
+}
+
+func (c *Connection) SendMsg(msgId uint32, data []byte) error {
+	if c.isClosed == true {
+		return errors.New("Connection closed when send msg")
+	}
+	dp := NewDataPack()
+	msg, err := dp.Pack(NewMsgPackage(msgId, data))
+	if err != nil {
+		fmt.Println("Pack error msg id= ", msgId)
+		return errors.New("Pack error msg")
+	}
+	if _, err := c.Conn.Write(msg); err != nil {
+		fmt.Println("Write msg id ", msgId, " error ")
+		c.ExitBuffChan <- true
+		return errors.New("conn write error")
+	}
+	return nil
 }

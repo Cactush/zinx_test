@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/Cactush/zinx_test/znet"
+	"io"
 	"net"
 	"time"
 )
@@ -20,18 +22,41 @@ func main() {
 		return
 	}
 	for {
-		_, err := conn.Write([]byte("Zinx V0.3"))
+		dp := znet.NewDataPack()
+		msgpck := znet.NewMsgPackage(0, []byte("zinx test message"))
+		fmt.Println(msgpck.Id, msgpck.DataLen)
+		msg, _ := dp.Pack(msgpck)
+		fmt.Println(msg)
+		_, err := conn.Write(msg)
 		if err != nil {
 			fmt.Println("write error err ", err)
 			return
 		}
-		buf := make([]byte, 512)
-		cnt, err := conn.Read(buf)
+		headData := make([]byte, dp.GetHeadLen())
+
+		_, err = io.ReadFull(conn, headData)
+		fmt.Println(headData)
 		if err != nil {
-			fmt.Println("read buf error ")
+			fmt.Println("read head error")
+			break
+		}
+		print(headData)
+		msgHead, err := dp.Unpack(headData)
+		if err != nil {
+			fmt.Println("server unpack err: ", err)
 			return
 		}
-		fmt.Printf(" server call back : %s, cnt = %d\n", buf[:cnt], cnt)
+		if msgHead.GetDatalen() > 0 {
+			msg := msgHead.(*znet.Message)
+			msg.Data = make([]byte, msg.GetDatalen())
+			_, err := io.ReadFull(conn, msg.Data)
+			if err != nil {
+				fmt.Println("server unpack data err: ", err)
+				return
+			}
+			fmt.Println("==> Recv Msg: ID= ", msg.Id, "data= ", string(msg.Data))
+		}
 		time.Sleep(1 * time.Second)
 	}
+
 }
