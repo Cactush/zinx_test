@@ -1,5 +1,6 @@
 package znet
 
+import "C"
 import (
 	"fmt"
 	"github.com/Cactush/zinx_test/ziface"
@@ -10,16 +11,16 @@ type Connection struct {
 	Conn         *net.TCPConn
 	ConnID       uint32
 	isClosed     bool
-	handleAPI    ziface.HandFunc
+	Router       ziface.IRouter
 	ExitBuffChan chan bool
 }
 
-func NewConnection(conn *net.TCPConn, connID uint32, callback_api ziface.HandFunc) *Connection {
+func NewConnection(conn *net.TCPConn, connID uint32, router ziface.IRouter) *Connection {
 	c := &Connection{
 		Conn:         conn,
 		ConnID:       connID,
 		isClosed:     false,
-		handleAPI:    callback_api,
+		Router:       router,
 		ExitBuffChan: make(chan bool, 1),
 	}
 	return c
@@ -37,11 +38,15 @@ func (c *Connection) StartReader() {
 			c.ExitBuffChan <- true
 			continue
 		}
-		if err := c.handleAPI(c.Conn, buf, cnt); err != nil {
-			fmt.Println("connID ", c.ConnID, " handle is error")
-			c.ExitBuffChan <- true
-			return
+		req := Request{
+			conn: c,
+			data: buf[:cnt],
 		}
+		go func(request ziface.IRequest) {
+			c.Router.PreHandle(request)
+			c.Router.Handle(request)
+			c.Router.PostHandle(request)
+		}(&req)
 	}
 }
 func (c *Connection) Start() {
