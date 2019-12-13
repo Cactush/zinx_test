@@ -23,7 +23,7 @@ func main() {
 	}
 	for {
 		dp := znet.NewDataPack()
-		msgpck := znet.NewMsgPackage(0, []byte("zinx test message"))
+		msgpck := znet.NewMsgPackage(1, []byte("zinx test message"))
 		fmt.Println(msgpck.Id, msgpck.DataLen)
 		msg, _ := dp.Pack(msgpck)
 		fmt.Println(msg)
