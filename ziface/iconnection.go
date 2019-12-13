@@ -9,5 +9,6 @@ type IConnection interface {
 	GetConnID() uint32
 	RemoteAddr() net.Addr
 	SendMsg(msgId uint32, data []byte) error
+	SendBufMsg(msgId uint32, data []byte) error
 }
 type HandFunc func(*net.TCPConn, []byte, int) error

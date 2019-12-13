@@ -15,6 +15,10 @@ type Server struct {
 	IP         string
 	Port       int
 	msgHandler ziface.IMsgHandle
+	ConnMgr    ziface.IConnManager
+
+	OnConnStart func(conn ziface.IConnection)
+	OnConnStop  func(conn ziface.IConnection)
 }
 
 func (s *Server) Start() {
@@ -42,7 +46,11 @@ func (s *Server) Start() {
 				fmt.Println("Accept err", err)
 				continue
 			}
-			dealConn := NewConnection(conn, cid, s.msgHandler)
+			if s.ConnMgr.Len() > utils.GlobalObject.MaxConn {
+				conn.Close()
+				continue
+			}
+			dealConn := NewConnection(s, conn, cid, s.msgHandler)
 			cid++
 			go dealConn.Start()
 		}
@@ -50,6 +58,7 @@ func (s *Server) Start() {
 }
 func (s *Server) Stop() {
 	fmt.Println("[STOP] Zinx server , name ", s.Name)
+	s.ConnMgr.ClearConn()
 }
 
 func (s *Server) Serve() {
@@ -66,6 +75,7 @@ func NewServer(name string) ziface.IServer {
 		IP:         utils.GlobalObject.Host,
 		Port:       utils.GlobalObject.TcpPort,
 		msgHandler: NewMsgHandle(),
+		ConnMgr:    NewConnManager(),
 	}
 	return s
 }
@@ -82,4 +92,30 @@ func CallBackToClient(conn *net.TCPConn, data []byte, cnt int) error {
 func (s *Server) AddRouter(msgId uint32, router ziface.IRouter) {
 	s.msgHandler.AddRouter(msgId, router)
 	fmt.Println("Add Router succ!")
+}
+
+func (s *Server) GetConnMgr() ziface.IConnManager {
+	return s.ConnMgr
+}
+
+func (s *Server) SetOnConnStart(hookFunc func(ziface.IConnection)) {
+	s.OnConnStart = hookFunc
+}
+
+func (s *Server) SetOnConnStop(hookFunc func(ziface.IConnection)) {
+	s.OnConnStop = hookFunc
+}
+
+func (s *Server) CallOnConnStart(conn ziface.IConnection) {
+	if s.OnConnStart != nil {
+		fmt.Println("---> CallOnConnStart...")
+		s.OnConnStart(conn)
+	}
+}
+
+func (s *Server) CallOnConnStop(conn ziface.IConnection) {
+	if s.OnConnStop != nil {
+		fmt.Println("-->CallOnConnStop...")
+		s.OnConnStop(conn)
+	}
 }

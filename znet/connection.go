@@ -11,6 +11,7 @@ import (
 )
 
 type Connection struct {
+	TcpServer    ziface.IServer
 	Conn         *net.TCPConn
 	ConnID       uint32
 	isClosed     bool
@@ -18,10 +19,12 @@ type Connection struct {
 	MsgHandler   ziface.IMsgHandle
 	ExitBuffChan chan bool
 	msgChan      chan []byte
+	msgBuffChan  chan []byte
 }
 
-func NewConnection(conn *net.TCPConn, connID uint32, msgHandler ziface.IMsgHandle) *Connection {
+func NewConnection(server ziface.IServer, conn *net.TCPConn, connID uint32, msgHandler ziface.IMsgHandle) *Connection {
 	c := &Connection{
+		TcpServer:  server,
 		Conn:       conn,
 		ConnID:     connID,
 		isClosed:   false,
@@ -29,7 +32,9 @@ func NewConnection(conn *net.TCPConn, connID uint32, msgHandler ziface.IMsgHandl
 
 		ExitBuffChan: make(chan bool, 1),
 		msgChan:      make(chan []byte),
+		msgBuffChan:  make(chan []byte, utils.GlobalObject.MaxMsgChanLen),
 	}
+	c.TcpServer.GetConnMgr().Add(c)
 	return c
 }
 
@@ -79,6 +84,8 @@ func (c *Connection) StartReader() {
 func (c *Connection) Start() {
 	go c.StartReader()
 	go c.StartWrite()
+
+	c.TcpServer.CallOnConnStart(c)
 	for {
 		select {
 		case <-c.ExitBuffChan:
@@ -92,8 +99,11 @@ func (c *Connection) Stop() {
 		return
 	}
 	c.isClosed = true
+	c.TcpServer.CallOnConnStop(c)
 	c.Conn.Close()
 	c.ExitBuffChan <- true
+	c.TcpServer.GetConnMgr().Remove(c)
+	close(c.ExitBuffChan)
 	close(c.ExitBuffChan)
 }
 
@@ -134,9 +144,33 @@ func (c *Connection) StartWrite() {
 				fmt.Println("Send Data Error:, ", err, " Conn Write exit")
 				return
 			}
+		case data, ok := <-c.msgBuffChan:
+			if ok {
+				if _, err := c.Conn.Write(data); err != nil {
+					fmt.Println("Send buff data error:", err)
+					return
+				}
+			} else {
+				fmt.Println("msgBUffchan is closed")
+				break
+			}
 		case <-c.ExitBuffChan:
 			return
 
 		}
 	}
+}
+
+func (c *Connection) SendBufMsg(msgId uint32, data []byte) error {
+	if c.isClosed == true {
+		return errors.New("")
+	}
+	dp := NewDataPack()
+	msg, err := dp.Pack(NewMsgPackage(msgId, data))
+	if err != nil {
+		fmt.Println("Pack error msg id=", msgId)
+		return errors.New("pack error msg")
+	}
+	c.msgBuffChan <- msg
+	return nil
 }
